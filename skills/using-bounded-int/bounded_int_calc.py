@@ -74,9 +74,15 @@ def calc_div(a_lo: int, a_hi: int, b_lo: int, b_hi: int) -> tuple[tuple[int, int
     Calculate division bounds.
     Quotient: [a_lo // b_hi, a_hi // b_lo]
     Remainder: [0, b_hi - 1]
+
+    Note: Cairo's bounded_int_div_rem requires non-negative dividends.
     """
     if b_lo <= 0:
         print("ERROR: Divisor lower bound must be positive!", file=sys.stderr)
+        sys.exit(1)
+
+    if a_lo < 0:
+        print("ERROR: Dividend lower bound must be non-negative! Cairo's bounded_int_div_rem does not support negative dividends.", file=sys.stderr)
         sys.exit(1)
 
     quot_lo = a_lo // b_hi

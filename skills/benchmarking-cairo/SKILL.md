@@ -22,6 +22,41 @@ If tools are missing, see `installation.md` in this skill directory.
 | **Export PNG** | `pprof -png -sample_index=<sample> -output <file.png> profile.pb.gz` |
 | **Launch web UI** | `pprof -http=:8080 profile.pb.gz` |
 
+## Output Location
+
+**All profiling artifacts go in `profiles/` at the project root.** Name files with package, function, metric, and git commit for version tracking:
+
+```
+profiles/<package>_<function>_<metric>_<commit>.<ext>
+```
+
+Examples:
+- `profiles/falcon_ntt512_steps_abc1234.pb.gz`
+- `profiles/falcon_ntt512_steps_abc1234.png`
+
+### Helper Function
+
+Define this function in your shell to generate compliant filenames:
+
+```bash
+# Add to your shell or copy-paste before use
+profile-name() {
+    local pkg="$1" fn="$2" metric="$3" ext="${4:-pb.gz}"
+    local commit=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    echo "profiles/${pkg}_${fn}_${metric}_${commit}.${ext}"
+}
+```
+
+**Quick usage:**
+```bash
+# Generate filename and use with cairo-profiler
+OUT=$(profile-name falcon ntt512 steps pb.gz)
+cairo-profiler build-profile <trace.json> --show-libfuncs --output-path "$OUT"
+
+# Export PNG
+pprof -png -sample_index=steps -output "$(profile-name falcon ntt512 steps png)" "$OUT"
+```
+
 ## Step 1: Generate Traces
 
 ### Option A: scarb execute (standalone Cairo programs)
@@ -189,16 +224,17 @@ cd packages/<pkg> && scarb execute \
   --print-resource-usage \
   --save-profiler-trace-data
 
-# 2. Build profile
+# 2. Build profile to profiles/
+OUT=$(profile-name <pkg> <func> steps)
 cairo-profiler build-profile \
   target/execute/<pkg>/execution1/cairo_profiler_trace.json \
-  --show-libfuncs
+  --show-libfuncs --output-path "$OUT"
 
 # 3. View top functions by steps
-cairo-profiler view profile.pb.gz --sample steps --limit 20
+cairo-profiler view "$OUT" --sample steps --limit 20
 
-# 4. Export PNG
-pprof -png -sample_index=steps -output <pkg>_steps.png profile.pb.gz
+# 4. Export PNG to profiles/
+pprof -png -sample_index=steps -output "$(profile-name <pkg> <func> steps png)" "$OUT"
 ```
 
 ### Full benchmark pipeline (snforge, steps)
@@ -207,16 +243,17 @@ pprof -png -sample_index=steps -output <pkg>_steps.png profile.pb.gz
 # 1. Run tests with cairo-steps tracking
 snforge test --save-trace-data --tracked-resource cairo-steps
 
-# 2. Build profile for a specific test
+# 2. Build profile to profiles/
+OUT=$(profile-name <pkg> <func> steps)
 cairo-profiler build-profile \
   snfoundry_trace/<test_name>.json \
-  --show-libfuncs
+  --show-libfuncs --output-path "$OUT"
 
 # 3. View top functions by steps
-cairo-profiler view profile.pb.gz --sample steps --limit 20
+cairo-profiler view "$OUT" --sample steps --limit 20
 
-# 4. Export PNG
-pprof -png -sample_index=steps -output test_steps.png profile.pb.gz
+# 4. Export PNG to profiles/
+pprof -png -sample_index=steps -output "$(profile-name <pkg> <func> steps png)" "$OUT"
 ```
 
 ### Full benchmark pipeline (snforge, l2 gas)
@@ -227,14 +264,15 @@ Requires `[cairo] enable-gas = true` in Scarb.toml and dispatcher pattern (see a
 # 1. Run tests with sierra-gas tracking
 snforge test --save-trace-data
 
-# 2. Build profile
+# 2. Build profile to profiles/
+OUT=$(profile-name <pkg> <func> l2gas)
 cairo-profiler build-profile \
   snfoundry_trace/<test_name>.json \
-  --show-libfuncs
+  --show-libfuncs --output-path "$OUT"
 
 # 3. View top functions by l2 gas
-cairo-profiler view profile.pb.gz --sample "l2 gas" --limit 20
+cairo-profiler view "$OUT" --sample "l2 gas" --limit 20
 
-# 4. Export PNG
-pprof -png -sample_index=l2_gas -output test_l2gas.png profile.pb.gz
+# 4. Export PNG to profiles/
+pprof -png -sample_index=l2_gas -output "$(profile-name <pkg> <func> l2gas png)" "$OUT"
 ```

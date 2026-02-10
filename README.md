@@ -7,7 +7,7 @@ A Claude Code plugin with skills for profiling and developing Cairo programs.
 | Skill | Description |
 |-------|-------------|
 | [benchmarking-cairo](skills/benchmarking-cairo/) | Profile Cairo functions with cairo-profiler and pprof |
-| [using-bounded-int](skills/using-bounded-int/) | Optimize Cairo arithmetic with bounded integers |
+| [cairo-coding](skills/cairo-coding/) | Cairo coding rules, performance patterns, and bounded-int optimization |
 
 ## Installation
 
@@ -29,7 +29,7 @@ To install individual skills in a Cairo project:
 git clone https://github.com/feltroidprime/cairo-skills.git ~/.cairo-skills
 mkdir -p .claude/skills
 ln -s ~/.cairo-skills/skills/benchmarking-cairo .claude/skills/benchmarking-cairo
-ln -s ~/.cairo-skills/skills/using-bounded-int .claude/skills/using-bounded-int
+ln -s ~/.cairo-skills/skills/cairo-coding .claude/skills/cairo-coding
 ```
 
 To update:

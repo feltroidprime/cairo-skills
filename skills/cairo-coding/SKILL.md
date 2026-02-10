@@ -1,11 +1,38 @@
 ---
 name: cairo-coding
-description: Use when writing, reviewing, or optimizing Cairo code — covers performance rules, loop patterns, storage packing, type sizing, and bounded-int arithmetic
+description: Use when writing or optimizing Cairo functions — fixing slow loops, expensive arithmetic, integer splitting or limb assembly, modular reduction, storage slot packing, or BoundedInt type bounds
 ---
 
 # Coding Cairo
 
 Rules and patterns for writing efficient Cairo code. Sourced from audit findings and production profiling.
+
+## When to Use
+
+- Implementing arithmetic (modular, parity checks, quotient/remainder)
+- Optimizing loops (slow iteration, repeated `.len()` calls, index-based access)
+- Splitting or assembling integer limbs (u256 → u128, u32s → u128, felt252 → u96)
+- Packing struct fields into storage slots
+- Using `BoundedInt` for zero-overhead arithmetic with compile-time bounds
+- Choosing integer types (u128 vs u256, BoundedInt vs native types)
+
+**Not for:** Profiling/benchmarking (use benchmarking-cairo)
+
+## Quick Reference — All Rules
+
+| # | Rule | Instead of | Use |
+|---|------|-----------|-----|
+| 1 | Combined quotient+remainder | `x / m` + `x % m` | `DivRem::div_rem(x, m)` |
+| 2 | Cheap loop conditions | `while i < n` | `while i != n` |
+| 3 | Constant powers of 2 | `2_u32.pow(k)` | `match`-based lookup table |
+| 4 | Pointer-based iteration | `*data.at(i)` in index loop | `pop_front` / `for` / `multi_pop_front` |
+| 5 | Cache array length | `.len()` in loop condition | `let n = data.len();` before loop |
+| 6 | Pointer-based slicing | Manual loop extraction | `span.slice(start, length)` |
+| 7 | Cheap parity/halving | `index & 1`, `index / 2` | `DivRem::div_rem(index, 2)` |
+| 8 | Smallest integer type | `u256` when range < 2^128 | `u128` (type encodes constraint) |
+| 9 | Storage slot packing | One slot per field | `StorePacking` trait |
+| 10 | BoundedInt for limbs | Bitwise ops / raw u128 math | `bounded_int::{div_rem, mul, add}` |
+| 11 | Fast 2-input Poseidon | `poseidon_hash_span([x,y])` | `hades_permutation(x, y, 2)` |
 
 ## Always / Never Rules
 
@@ -205,17 +232,6 @@ let selector = add(bit0, mul(bit1, TWO_UI));  // selector in {0..3}
 
 See [garaga/selectors.cairo](https://github.com/keep-starknet-strange/garaga/blob/main/src/src/ec/selectors.cairo) and [cairo-perfs-snippets](https://github.com/feltroidprime/cairo-perfs-snippets) for production examples.
 
-## Performance Practices
-
-### Poseidon: use `hades_permutation` for 2-input hashes
-
-For `h(x, y)`, `hades_permutation(x, y, 2)` is cheaper than `poseidon_hash_span([x, y])`.
-
-```cairo
-// Direct 2-input hash
-let (h, _, _) = core::poseidon::hades_permutation(x, y, 2);
-```
-
 ## Code Quality
 
 - **DRY:** Extract repeated validation into helper functions. If two functions validate-then-write the same struct, extract a shared `_set_config()`.
@@ -365,7 +381,7 @@ python3 bounded_int_calc.py div 0 24576 12289 12289
 python3 bounded_int_calc.py mul 0 12288 0 12288 --name MulZqImpl
 ```
 
-### Quick Reference
+### BoundedInt Bounds Quick Reference
 
 | Operation | Formula |
 |-----------|---------|

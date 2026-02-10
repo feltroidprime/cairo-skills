@@ -9,191 +9,128 @@ description: Use when profiling Cairo functions, measuring step counts, analyzin
 
 Profile Cairo function execution to identify hotspots by steps, calls, range checks, and other builtins. Works with both `scarb execute` (standalone programs) and `snforge test` (Starknet Foundry tests).
 
-If tools are missing, see `installation.md` in this skill directory.
+If tools are missing, see `installation.md` in this skill directory. The CLI script is `profile.py` in this skill directory.
 
-## Quick Reference
+## REQUIRED: Use the CLI
 
-| Step | Command |
-|------|---------|
-| **Generate trace (scarb)** | `scarb execute --arguments-file <args.json> --print-resource-usage --save-profiler-trace-data` |
-| **Generate trace (snforge)** | `snforge test --save-trace-data --tracked-resource <resource>` |
-| **Build profile** | `cairo-profiler build-profile <trace.json> --show-libfuncs` |
-| **View in terminal** | `cairo-profiler view profile.pb.gz --sample <sample> --limit 20` |
-| **Export PNG** | `pprof -png -sample_index=<sample> -output <file.png> profile.pb.gz` |
-| **Launch web UI** | `pprof -http=:8080 profile.pb.gz` |
+**Always use `python3 profile.py profile` (from this skill directory) for profiling.** Do NOT run snforge/cairo-profiler/pprof manually — the CLI handles the full pipeline deterministically (trace generation, profile building, PNG export, naming).
 
-## Output Location
-
-**All profiling artifacts go in `profiles/` at the project root.** Name files with package, function, metric, and git commit for version tracking:
-
-```
-profiles/<package>_<function>_<metric>_<commit>.<ext>
-```
-
-Examples:
-- `profiles/falcon_ntt512_steps_abc1234.pb.gz`
-- `profiles/falcon_ntt512_steps_abc1234.png`
-
-### Helper Function
-
-Define this function in your shell to generate compliant filenames:
+### snforge mode (test functions)
 
 ```bash
-# Add to your shell or copy-paste before use
-profile-name() {
-    local pkg="$1" fn="$2" metric="$3" ext="${4:-pb.gz}"
-    local commit=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-    echo "profiles/${pkg}_${fn}_${metric}_${commit}.${ext}"
-}
+python3 profile.py profile \
+  --mode snforge \
+  --package falcon \
+  --test test_ntt_zknox_vs_felt252 \
+  --name ntt-zknox-reduced \
+  --metric steps
 ```
 
-**Quick usage:**
-```bash
-# Generate filename and use with cairo-profiler
-OUT=$(profile-name falcon ntt512 steps pb.gz)
-cairo-profiler build-profile <trace.json> --show-libfuncs --output-path "$OUT"
-
-# Export PNG
-pprof -png -sample_index=steps -output "$(profile-name falcon ntt512 steps png)" "$OUT"
-```
-
-## Step 1: Generate Traces
-
-### Option A: scarb execute (standalone Cairo programs)
+### scarb mode (standalone executables)
 
 ```bash
-# From the package directory (e.g., cd packages/falcon)
-scarb execute \
-  --arguments-file tests/data/args_512_1.json \
-  --print-resource-usage \
-  --save-profiler-trace-data
+python3 profile.py profile \
+  --mode scarb \
+  --package falcon \
+  --executable bench_ntt \
+  --args-file tests/data/ntt_input_512.json \
+  --name ntt-felt252 \
+  --metric steps
 ```
 
-Trace output location: `target/execute/<package_name>/execution1/cairo_profiler_trace.json`
+### CLI arguments
 
-The `--print-resource-usage` flag prints a summary of VM steps, memory holes, and builtin usage to stdout.
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--mode` | yes | `snforge` or `scarb` |
+| `--package` | yes | Scarb package name (e.g. `falcon`) |
+| `--name` | yes | Human-friendly profile label (e.g. `ntt-zknox-reduced`) |
+| `--test` | snforge | Test filter passed to `snforge test` |
+| `--executable` | scarb | Executable name for `scarb execute` |
+| `--args-file` | no | Arguments file for `scarb execute` |
+| `--metric` | no | `steps` (default), `rc`, `sierra-gas`, `l2-gas` |
+| `--output` | no | Output directory (default: `profiles/`) |
+| `--nodefraction` | no | Hide PNG nodes below this fraction of total (default: `0.005`). Use `0` to show all nodes. |
+| `--edgefraction` | no | Hide PNG edges below this fraction of total (default: `0.001`). Use `0` to show all edges. |
 
-### Option B: snforge test (Starknet Foundry)
+### CLI exit codes — act on errors
+
+| Code | Meaning | What to do |
+|------|---------|------------|
+| 0 | Success | Read the PNG path from output |
+| 1 | Argument error | Fix the CLI invocation |
+| 2 | snforge/scarb failed | Check compilation errors, test failures |
+| 3 | Trace file not found | Test must PASS to produce a trace. Check test name matches exactly. |
+| 4 | cairo-profiler failed | Check trace JSON is valid |
+| 5 | pprof PNG export failed | Check graphviz is installed (`apt install graphviz`) |
+| 6 | Missing tool | Install the missing tool (see `installation.md`) |
+
+### Output
+
+The CLI produces two files in `profiles/`:
+```
+profiles/YY-MM-DD-HH:MM_<package>_<name>_<metric>_<commit>.pb.gz
+profiles/YY-MM-DD-HH:MM_<package>_<name>_<metric>_<commit>.png
+```
+
+After running the CLI, **always read the PNG** to verify the profile shows the expected functions.
+
+## Pitfalls
+
+### Stale trace files
+
+`snfoundry_trace/` keeps old traces. If you change code and re-profile, you MUST re-run `snforge test --save-trace-data` (the CLI does this automatically). **Never build a profile from a trace that predates your code change.**
+
+### Missing functions in the PNG
+
+If a function doesn't appear in the PNG, it may be below the `--nodefraction` threshold. Use `--nodefraction 0` to show all nodes. You can also check the text output (printed by the CLI) — functions with 0 flat steps but high cumulative steps are wrappers that delegate all work to callees.
+
+### Timestamp mismatch between pb.gz and png
+
+When running steps manually, the pb.gz and png may get different timestamps if they cross a minute boundary. The CLI computes the timestamp once so both files always match.
+
+## Manual profiling (advanced)
+
+For interactive exploration beyond what the CLI provides:
 
 ```bash
-# Generate traces tracking cairo steps (gives steps, range check builtin, memory holes samples)
-snforge test --save-trace-data --tracked-resource cairo-steps
+# Launch web UI for interactive flame graphs
+pprof -http=:8080 profiles/<name>.pb.gz
 
-# Generate traces tracking sierra gas (gives sierra gas, l2 gas samples)
-snforge test --save-trace-data --tracked-resource sierra-gas
+# View specific sample in terminal
+cairo-profiler view profiles/<name>.pb.gz --sample steps --limit 20
 
-# Or auto-invoke cairo-profiler after tests
-snforge test --build-profile -- --show-libfuncs
+# List available samples
+cairo-profiler view profiles/<name>.pb.gz --list-samples
 ```
 
-`--tracked-resource` controls which samples appear in the profile:
+## Metric reference
 
-| `--tracked-resource` | Samples available |
-|----------------------|-------------------|
-| `cairo-steps` | `steps`, `calls`, `range check builtin`, `memory holes`, `casm size` |
-| `sierra-gas` (default) | `sierra gas`, `calls`, `casm size`, `l2 gas`* |
+| `--metric` | tracked-resource | Samples in profile |
+|------------|------------------|--------------------|
+| `steps` | `cairo-steps` | steps, calls, range check builtin, memory holes, casm size |
+| `rc` | `cairo-steps` | (same as steps, PNG shows range check builtin) |
+| `sierra-gas` | `sierra-gas` | sierra gas, calls, casm size |
+| `l2-gas` | `sierra-gas` | l2 gas (requires `enable-gas = true` + dispatcher pattern) |
 
-\* `l2 gas` requires additional setup, see **L2 Gas Profiling** section below.
+## L2 Gas profiling (snforge)
 
-Trace output location: `snfoundry_trace/` directory (one file per passing test, excludes fuzz tests).
+L2 gas requires **all three**:
 
-When using `--build-profile`, profiling output goes to `profile/` directory.
-
-## Step 2: Build Profile
-
-```bash
-cairo-profiler build-profile target/execute/<package>/execution1/cairo_profiler_trace.json \
-  --show-libfuncs
-```
-
-Output: `profile.pb.gz` (pprof-compatible protobuf format).
-
-Key flags:
-- `--show-libfuncs` - include low-level Sierra libfuncs (essential for granular analysis)
-- `--output-path <path>` - custom output location (default: `profile.pb.gz`)
-- `--show-inlined-functions` - show inlined functions (requires Scarb >= 2.7.0 and `unstable-add-statements-functions-debug-info = true` in Scarb.toml `[cairo]` section)
-- `--split-generics` - separate `fn<felt252>` from `fn<u8>`
-- `--view` - immediately display results after building
-
-## Step 3: View Results
-
-### Available Samples
-
-Run `cairo-profiler view profile.pb.gz --list-samples` to see available samples.
-
-### Terminal View
-
-```bash
-cairo-profiler view profile.pb.gz --sample steps --limit 20
-```
-
-Use `--hide <regex>` to filter out noise.
-
-### PNG Export (via pprof)
-
-```bash
-# Steps call graph
-pprof -png -sample_index=steps -output profile_steps.png profile.pb.gz
-
-# Range check builtin call graph
-pprof -png -sample_index="range check builtin" -output profile_rc.png profile.pb.gz
-
-# Sierra gas call graph
-pprof -png -sample_index=sierra_gas -output profile_gas.png profile.pb.gz
-
-# Limit visible nodes
-pprof -png -sample_index=steps -nodecount=30 -output profile_steps.png profile.pb.gz
-```
-
-Requires `graphviz` installed (for `dot` renderer).
-
-### Interactive Web UI (via pprof)
-
-```bash
-pprof -http=:8080 profile.pb.gz
-```
-
-Opens a browser with flame graphs, call graphs, and top-function views. Sample type is selectable in the web UI dropdown.
-
-## L2 Gas Profiling (snforge)
-
-L2 gas profiling includes function execution costs **and** syscall gas costs. It requires **all three** of the following:
-
-### 1. Enable gas in Scarb.toml
-
-```toml
-[cairo]
-enable-gas = true
-```
-
-Without this, traces have `enable_gas: null` and no `l2 gas` sample is generated.
-
-### 2. Use sierra-gas tracking (default)
-
-```bash
-snforge test --save-trace-data --tracked-resource sierra-gas
-```
-
-### 3. Use the dispatcher pattern (deploy contract + call via dispatcher)
-
-**L2 gas profiling only works when the profiled code runs inside a deployed contract**, called through a dispatcher. Direct syscall calls from test functions do **not** produce l2 gas data.
+1. `[cairo] enable-gas = true` in Scarb.toml
+2. `--metric l2-gas` (uses sierra-gas tracking)
+3. **Dispatcher pattern** — profiled code must run inside a deployed contract
 
 ```cairo
-// Contract wrapping the function to profile
 #[starknet::interface]
 trait IBench<TContractState> {
     fn my_function(self: @TContractState) -> felt252;
 }
 
 #[starknet::contract]
-mod bench {
-    // ... implementation
-}
+mod bench { /* ... */ }
 
-// Test using dispatcher pattern
-use snforge_std::{declare, ContractClassTrait, DeclareResultTrait};
-use my_package::{IBenchDispatcher, IBenchDispatcherTrait};
-
+// Test using dispatcher
 #[test]
 fn bench_my_function() {
     let contract = declare("bench").unwrap().contract_class();
@@ -203,76 +140,4 @@ fn bench_my_function() {
 }
 ```
 
-### Known limitation: syscall costs are invisible in the call graph
-
-**As of cairo-profiler 0.14.0**, syscall execution costs (secp256r1, keccak, sha256, etc.) are **not attributed** in the l2 gas call graph. The profile only shows Cairo-side wrapper code. For syscall-heavy functions, this means the profile may show <1% of actual gas cost.
-
-Example: `secp256r1::recover_public_key` reports ~27.7M l2_gas via snforge, but the profiler only shows ~112k l2 gas (the Cairo wrapper around the EC syscalls).
-
-The snforge test output (`l1_gas`, `l1_data_gas`, `l2_gas`) is the authoritative gas measurement. Use the profiler for relative hotspot analysis within Cairo code, and snforge output for total gas cost.
-
-Tracked at: https://github.com/software-mansion/cairo-profiler/issues/239
-
-## Common Patterns
-
-### Full benchmark pipeline (scarb execute)
-
-```bash
-# 1. Execute with profiling
-cd packages/<pkg> && scarb execute \
-  --arguments-file tests/data/<args>.json \
-  --print-resource-usage \
-  --save-profiler-trace-data
-
-# 2. Build profile to profiles/
-OUT=$(profile-name <pkg> <func> steps)
-cairo-profiler build-profile \
-  target/execute/<pkg>/execution1/cairo_profiler_trace.json \
-  --show-libfuncs --output-path "$OUT"
-
-# 3. View top functions by steps
-cairo-profiler view "$OUT" --sample steps --limit 20
-
-# 4. Export PNG to profiles/
-pprof -png -sample_index=steps -output "$(profile-name <pkg> <func> steps png)" "$OUT"
-```
-
-### Full benchmark pipeline (snforge, steps)
-
-```bash
-# 1. Run tests with cairo-steps tracking
-snforge test --save-trace-data --tracked-resource cairo-steps
-
-# 2. Build profile to profiles/
-OUT=$(profile-name <pkg> <func> steps)
-cairo-profiler build-profile \
-  snfoundry_trace/<test_name>.json \
-  --show-libfuncs --output-path "$OUT"
-
-# 3. View top functions by steps
-cairo-profiler view "$OUT" --sample steps --limit 20
-
-# 4. Export PNG to profiles/
-pprof -png -sample_index=steps -output "$(profile-name <pkg> <func> steps png)" "$OUT"
-```
-
-### Full benchmark pipeline (snforge, l2 gas)
-
-Requires `[cairo] enable-gas = true` in Scarb.toml and dispatcher pattern (see above).
-
-```bash
-# 1. Run tests with sierra-gas tracking
-snforge test --save-trace-data
-
-# 2. Build profile to profiles/
-OUT=$(profile-name <pkg> <func> l2gas)
-cairo-profiler build-profile \
-  snfoundry_trace/<test_name>.json \
-  --show-libfuncs --output-path "$OUT"
-
-# 3. View top functions by l2 gas
-cairo-profiler view "$OUT" --sample "l2 gas" --limit 20
-
-# 4. Export PNG to profiles/
-pprof -png -sample_index=l2_gas -output "$(profile-name <pkg> <func> l2gas png)" "$OUT"
-```
+**Known limitation:** Syscall execution costs (secp256r1, keccak, etc.) are not attributed in the l2 gas profile. Use snforge test output for total gas; use profiler for relative hotspot analysis within Cairo code.

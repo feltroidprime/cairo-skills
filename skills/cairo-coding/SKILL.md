@@ -105,7 +105,22 @@ while i != length {
 let result = data.slice(start, length);
 ```
 
-### 7. Always use the smallest integer type that fits the value range
+### 7. Always use `DivRem` for parity checks — never use bitwise ops
+
+Bitwise AND is more expensive than `div_rem` in Cairo. Use `DivRem::div_rem(x, 2)` to get both the halved value and parity in one operation.
+
+```cairo
+// BAD
+let is_odd = (index & 1) == 1;
+index = index / 2;
+
+// GOOD
+let (q, r) = DivRem::div_rem(index, 2);
+if r == 1 { /* odd branch */ }
+index = q;
+```
+
+### 8. Always use the smallest integer type that fits the value range
 
 `u128` instead of `u256` when the range is known. Adds clarity, prevents intermediate overflow.
 
@@ -117,7 +132,7 @@ fn deposit(value: u256) { assert(value < MAX_U128, '...'); ... }
 fn deposit(value: u128) { ... }
 ```
 
-### 8. Always use `StorePacking` to pack small fields into one storage slot
+### 9. Always use `StorePacking` to pack small fields into one storage slot
 
 Multiple small fields (basis points, flags, bounded amounts) can share a single `felt252` slot.
 
@@ -138,21 +153,6 @@ impl MyStorePacking of StorePacking<MyStruct, felt252> {
 ```
 
 ## Performance Practices
-
-### DivRem for parity checks
-
-Use `DivRem::div_rem(index, 2)` instead of bitwise AND + division.
-
-```cairo
-// BAD
-let is_odd = (index & 1) == 1;
-index = index / 2;
-
-// GOOD
-let (q, r) = DivRem::div_rem(index, 2);
-if r == 1 { /* odd branch */ }
-index = q;
-```
 
 ### Poseidon: use `hades_permutation` for 2-input hashes
 

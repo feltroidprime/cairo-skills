@@ -8,7 +8,7 @@ Outputs ready-to-paste Cairo code.
 
 Usage:
     python3 bounded_int_calc.py add <a_lo> <a_hi> <b_lo> <b_hi> [--name NAME]
-    python3 bounded_int_calc.py sub <a_lo> <a_hi> <b_lo> <b_hi> [--offset N] [--name NAME]
+    python3 bounded_int_calc.py sub <a_lo> <a_hi> <b_lo> <b_hi> [--name NAME]
     python3 bounded_int_calc.py mul <a_lo> <a_hi> <b_lo> <b_hi> [--name NAME]
     python3 bounded_int_calc.py div <a_lo> <a_hi> <b_lo> <b_hi> [--name NAME]
 """
@@ -44,13 +44,10 @@ def calc_add(a_lo: int, a_hi: int, b_lo: int, b_hi: int) -> tuple[int, int]:
     return result_lo, result_hi
 
 
-def calc_sub(a_lo: int, a_hi: int, b_lo: int, b_hi: int, offset: int = 0) -> tuple[int, int]:
-    """
-    Calculate subtraction bounds: [a_lo - b_hi, a_hi - b_lo]
-    With offset: [(a_lo + offset) - b_hi, (a_hi + offset) - b_lo]
-    """
-    result_lo = (a_lo + offset) - b_hi
-    result_hi = (a_hi + offset) - b_lo
+def calc_sub(a_lo: int, a_hi: int, b_lo: int, b_hi: int) -> tuple[int, int]:
+    """Calculate subtraction bounds: [a_lo - b_hi, a_hi - b_lo]"""
+    result_lo = a_lo - b_hi
+    result_hi = a_hi - b_lo
     return result_lo, result_hi
 
 
@@ -104,27 +101,13 @@ def generate_add_impl(a_lo: int, a_hi: int, b_lo: int, b_hi: int, name: str) -> 
 }}"""
 
 
-def generate_sub_impl(a_lo: int, a_hi: int, b_lo: int, b_hi: int, name: str, offset: int = 0) -> str:
-    if offset > 0:
-        # Show the effective input bounds after adding offset
-        eff_a_lo = a_lo + offset
-        eff_a_hi = a_hi + offset
-        result_lo, result_hi = calc_sub(a_lo, a_hi, b_lo, b_hi, offset)
+def generate_sub_impl(a_lo: int, a_hi: int, b_lo: int, b_hi: int, name: str) -> str:
+    result_lo, result_hi = calc_sub(a_lo, a_hi, b_lo, b_hi)
 
-        validate_felt252(result_lo, "Result min")
-        validate_felt252(result_hi, "Result max")
+    validate_felt252(result_lo, "Result min")
+    validate_felt252(result_hi, "Result max")
 
-        return f"""// Input after offset: [{eff_a_lo}, {eff_a_hi}] - [{b_lo}, {b_hi}]
-impl {name} of SubHelper<BoundedInt<{format_bound(eff_a_lo)}, {format_bound(eff_a_hi)}>, BoundedInt<{format_bound(b_lo)}, {format_bound(b_hi)}>> {{
-    type Result = BoundedInt<{format_bound(result_lo)}, {format_bound(result_hi)}>;
-}}"""
-    else:
-        result_lo, result_hi = calc_sub(a_lo, a_hi, b_lo, b_hi)
-
-        validate_felt252(result_lo, "Result min")
-        validate_felt252(result_hi, "Result max")
-
-        return f"""impl {name} of SubHelper<BoundedInt<{format_bound(a_lo)}, {format_bound(a_hi)}>, BoundedInt<{format_bound(b_lo)}, {format_bound(b_hi)}>> {{
+    return f"""impl {name} of SubHelper<BoundedInt<{format_bound(a_lo)}, {format_bound(a_hi)}>, BoundedInt<{format_bound(b_lo)}, {format_bound(b_hi)}>> {{
     type Result = BoundedInt<{format_bound(result_lo)}, {format_bound(result_hi)}>;
 }}"""
 
@@ -163,8 +146,8 @@ Examples:
     # Addition: [0, 12288] + [0, 12288]
     python3 bounded_int_calc.py add 0 12288 0 12288
 
-    # Subtraction with offset for unsigned result: (a + 12289) - b
-    python3 bounded_int_calc.py sub 0 12288 0 12288 --offset 12289
+    # Subtraction: [0, 12288] - [0, 12288]
+    python3 bounded_int_calc.py sub 0 12288 0 12288
 
     # Multiplication: [0, 12288] * [0, 12288]
     python3 bounded_int_calc.py mul 0 12288 0 12288
@@ -193,7 +176,6 @@ Examples:
     sub_parser.add_argument("a_hi", type=int, help="Upper bound of first operand")
     sub_parser.add_argument("b_lo", type=int, help="Lower bound of second operand")
     sub_parser.add_argument("b_hi", type=int, help="Upper bound of second operand")
-    sub_parser.add_argument("--offset", type=int, default=0, help="Offset to add to first operand (for unsigned pattern)")
     sub_parser.add_argument("--name", default="SubImpl", help="Name for the impl")
 
     # Mul command
@@ -217,7 +199,7 @@ Examples:
     if args.operation == "add":
         print(generate_add_impl(args.a_lo, args.a_hi, args.b_lo, args.b_hi, args.name))
     elif args.operation == "sub":
-        print(generate_sub_impl(args.a_lo, args.a_hi, args.b_lo, args.b_hi, args.name, args.offset))
+        print(generate_sub_impl(args.a_lo, args.a_hi, args.b_lo, args.b_hi, args.name))
     elif args.operation == "mul":
         print(generate_mul_impl(args.a_lo, args.a_hi, args.b_lo, args.b_hi, args.name))
     elif args.operation == "div":

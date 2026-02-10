@@ -365,10 +365,6 @@ python3 bounded_int_calc.py add 0 12288 0 12288
 python3 bounded_int_calc.py sub 0 12288 0 12288
 # -> BoundedInt<-12288, 12288>
 
-# Subtraction with offset: (a + offset) - b
-python3 bounded_int_calc.py sub 0 12288 0 12288 --offset 12289
-# -> BoundedInt<1, 24577>
-
 # Multiplication
 python3 bounded_int_calc.py mul 0 12288 0 12288
 # -> BoundedInt<0, 150994944>
@@ -391,15 +387,41 @@ python3 bounded_int_calc.py mul 0 12288 0 12288 --name MulZqImpl
 | Div quotient | `[a_lo / b_hi, a_hi / b_lo]` |
 | Div remainder | `[0, b_hi - 1]` |
 
+### Negative Dividends: SHIFT Pattern
+
+`bounded_int_div_rem` doesn't support negative lower bounds. When a subtraction produces a negative-bounded result that needs reduction, add a multiple of the modulus first:
+
+```cairo
+// sub_mod: (a - b) mod Q via SHIFT
+pub fn sub_mod(a: Zq, b: Zq) -> Zq {
+    let a_plus_q: BoundedInt<12289, 24577> = add(a, Q_CONST);  // shift by +Q
+    let diff: BoundedInt<1, 24577> = sub(a_plus_q, b);           // now non-negative
+    let (_q, rem) = bounded_int_div_rem(diff, nz_q());
+    rem
+}
+
+// fused_sub_mul_mod: a - (b*c) mod Q via large SHIFT
+// OFFSET = 12288 * Q = 151007232 (smallest multiple of Q >= max product)
+pub fn fused_sub_mul_mod(a: Zq, b: Zq, c: Zq) -> Zq {
+    let prod: ZqProd = mul(b, c);
+    let a_offset: BoundedInt<151007232, 151019520> = add(a, OFFSET_CONST);
+    let diff: BoundedInt<12288, 151019520> = sub(a_offset, prod);
+    let (_q, rem) = bounded_int_div_rem(diff, nz_q());
+    rem
+}
+```
+
+Rule: SHIFT = `ceil(|min_possible_value| / modulus) * modulus`. Adding SHIFT preserves the result mod Q (since SHIFT ≡ 0 mod Q) while making all values non-negative.
+
 ### Common BoundedInt Mistakes
 
 - **Downcast at every function call** — the biggest performance killer. Use `BoundedInt` types throughout, not just inside arithmetic functions.
 - **Trying to upcast to a narrower type** — `upcast(val: u32)` to `BoundedInt<0, 150994944>` fails because u32 max > 150994944.
 - **Wrong imports** — use exact imports from Prerequisites section above.
 - **Wrong subtraction bounds** — it's `[a_lo - b_hi, a_hi - b_lo]`, NOT `[a_lo - b_lo, a_hi - b_hi]`.
-- **Subtraction can go negative** — if `a_lo - b_hi < 0`, you need signed bounds or add an offset first.
+- **Negative dividend in `bounded_int_div_rem`** — div_rem doesn't support negative lower bounds. Add a SHIFT (multiple of modulus) before reducing. See SHIFT pattern above.
 - **Missing intermediate types** — always annotate: `let sum: ZqSum = add(a, b);`
 - **Division quotient off-by-one** — integer division floors: `24576 / 12289 = 1`, not 2.
 - **Using `UnitInt` vs `BoundedInt` for constants** — use `UnitInt<N>` for singleton constants like divisors.
 - **Using `div_rem` vs `bounded_int_div_rem`** — the function is `bounded_int_div_rem`, not `div_rem`.
-- **Bounds too large for casm backend** — very large bounds may cause compiler errors. Split operations to keep intermediate values smaller.
+- **Bounds exceed u128::max** — BoundedInt bounds are hard-capped at 2^128. Larger values crash the Sierra specializer: 'Provided generic argument is unsupported.'

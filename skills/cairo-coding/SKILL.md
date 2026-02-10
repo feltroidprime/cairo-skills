@@ -152,6 +152,59 @@ impl MyStorePacking of StorePacking<MyStruct, felt252> {
 }
 ```
 
+### 10. Always use BoundedInt for byte cutting, limb assembly, and type conversions
+
+Never use bitwise ops (`&`, `|`, shifts) or raw `u128`/`u256` arithmetic for splitting or combining integer limbs. Use `bounded_int::div_rem` to extract parts and `bounded_int::mul` + `bounded_int::add` to assemble them. BoundedInt tracks bounds at compile time, eliminating overflow checks.
+
+**Assembling limbs** (e.g., 4 x u32 → u128):
+
+```cairo
+// BAD — direct u128 arithmetic (28,340 gas)
+fn u32s_to_u128(d0: u32, d1: u32, d2: u32, d3: u32) -> u128 {
+    d0.into() + d1.into() * POW_2_32 + d2.into() * POW_2_64 + d3.into() * POW_2_96
+}
+
+// GOOD — BoundedInt (13,840 gas, 2x faster)
+fn u32s_to_u128(d0: u32, d1: u32, d2: u32, d3: u32) -> u128 {
+    let d0_bi: u32_bi = upcast(d0);
+    let d1_bi: u32_bi = upcast(d1);
+    let d2_bi: u32_bi = upcast(d2);
+    let d3_bi: u32_bi = upcast(d3);
+    let r: u128_bi = add(add(add(d0_bi, mul(d1_bi, POW_32_UI)), mul(d2_bi, POW_64_UI)), mul(d3_bi, POW_96_UI));
+    upcast(r)
+}
+```
+
+**Splitting values** (e.g., felt252 → two u96 limbs):
+
+```cairo
+// GOOD — div_rem to split, mul+add to reassemble
+fn felt252_to_two_u96(value: felt252) -> (u96, u96) {
+    match u128s_from_felt252(value) {
+        U128sFromFelt252Result::Narrow(low) => {
+            let (hi32, lo96) = bounded_int::div_rem(low, NZ_POW96_TYPED);
+            (lo96, upcast(hi32))
+        },
+        U128sFromFelt252Result::Wide((high, low)) => {
+            let (lo_hi32, lo96) = bounded_int::div_rem(low, NZ_POW96_TYPED);
+            let hi64: BoundedInt<0, { POW64 - 1 }> = downcast(high).unwrap();
+            (lo96, bounded_int::add(bounded_int::mul(hi64, POW32_TYPED), lo_hi32))
+        },
+    }
+}
+```
+
+**Extracting bits** (e.g., building a 4-bit selector):
+
+```cairo
+// GOOD — div_rem by 2 extracts LSB, quotient is right-shifted value
+let (qu1, bit0) = bounded_int::div_rem(u1, TWO_NZ);  // bit0 in {0,1}
+let (qu2, bit1) = bounded_int::div_rem(u2, TWO_NZ);
+let selector = add(bit0, mul(bit1, TWO_UI));  // selector in {0..3}
+```
+
+See [garaga/selectors.cairo](https://github.com/keep-starknet-strange/garaga/blob/main/src/src/ec/selectors.cairo) and [cairo-perfs-snippets](https://github.com/feltroidprime/cairo-perfs-snippets) for production examples.
+
 ## Performance Practices
 
 ### Poseidon: use `hades_permutation` for 2-input hashes
